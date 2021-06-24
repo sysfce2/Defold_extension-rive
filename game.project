@@ -14,7 +14,11 @@ input_method = HiddenInputField
 
 [project]
 title = extension-rive
+dependencies#0 = https://github.com/defold/extension-vulkan/archive/master.zip
 
 [library]
 include_dirs = defold-rive,assets
+
+[shader]
+output_spirv = 1
 

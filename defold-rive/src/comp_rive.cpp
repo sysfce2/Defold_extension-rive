@@ -180,9 +180,11 @@ namespace dmRive
             {"position", 0, 2, dmGraphics::TYPE_FLOAT, false}
         };
 
+        // dummydata for vulkan
+        const char dummy_data[4];
         world->m_VertexDeclaration = dmGraphics::NewVertexDeclaration(context->m_GraphicsContext, ve, sizeof(ve) / sizeof(dmGraphics::VertexElement));
-        world->m_VertexBuffer      = dmGraphics::NewVertexBuffer(context->m_GraphicsContext, 0, 0x0, dmGraphics::BUFFER_USAGE_DYNAMIC_DRAW);
-        world->m_IndexBuffer       = dmGraphics::NewIndexBuffer(context->m_GraphicsContext, 0, 0x0, dmGraphics::BUFFER_USAGE_DYNAMIC_DRAW);
+        world->m_VertexBuffer      = dmGraphics::NewVertexBuffer(context->m_GraphicsContext, sizeof(dummy_data), dummy_data, dmGraphics::BUFFER_USAGE_DYNAMIC_DRAW);
+        world->m_IndexBuffer       = dmGraphics::NewIndexBuffer(context->m_GraphicsContext, sizeof(dummy_data), dummy_data, dmGraphics::BUFFER_USAGE_DYNAMIC_DRAW);
 
         // TODO: Make this count configurable and/or grow accordingly
         world->m_VertexBufferData.SetCapacity(context->m_MaxInstanceCount * 512);
@@ -790,8 +792,8 @@ namespace dmRive
         {
             case dmRender::RENDER_LIST_OPERATION_BEGIN:
             {
-                dmGraphics::SetVertexBufferData(world->m_VertexBuffer, 0, 0, dmGraphics::BUFFER_USAGE_STATIC_DRAW);
-                dmGraphics::SetIndexBufferData(world->m_IndexBuffer, 0, 0, dmGraphics::BUFFER_USAGE_STATIC_DRAW);
+                // dmGraphics::SetVertexBufferData(world->m_VertexBuffer, 0, 0, dmGraphics::BUFFER_USAGE_STATIC_DRAW);
+                // dmGraphics::SetIndexBufferData(world->m_IndexBuffer, 0, 0, dmGraphics::BUFFER_USAGE_STATIC_DRAW);
 
                 world->m_RenderObjects.SetSize(0);
                 dmArray<RiveVertex>& vertex_buffer = world->m_VertexBufferData;
