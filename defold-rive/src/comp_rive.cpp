@@ -766,13 +766,8 @@ namespace dmRive
 
             DO_LOG("\n");
 
-        #undef DO_LOG
-
-            const dmRive::FsUniforms fs_uniforms = draw_desc.m_FsUniforms;
-            const dmRive::VsUniforms vs_uniforms = draw_desc.m_VsUniforms;
-            const int MAX_STOPS = 4;
-            const int MAX_COLORS = 16;
-            const int num_stops = fs_uniforms.stopCount > 1 ? fs_uniforms.stopCount : 1;
+            const dmRive::FsUniforms& fs_uniforms = draw_desc.m_FsUniforms;
+            const dmRive::VsUniforms& vs_uniforms = draw_desc.m_VsUniforms;
 
             dmVMath::Vector4 properties((float)fs_uniforms.fillType, (float) fs_uniforms.stopCount, 0.0f, 0.0f);
             dmVMath::Vector4 gradient_limits(vs_uniforms.gradientStart.x, vs_uniforms.gradientStart.y, vs_uniforms.gradientEnd.x, vs_uniforms.gradientEnd.y);
@@ -802,6 +797,8 @@ namespace dmRive
             vertex_offset += draw_desc.m_VerticesCount;
         }
 
+    #undef DO_LOG
+
         // uint32_t num_ros_used = ProcessRiveEvents(ctx, renderer, vb_begin, ix_begin, RiveEventCallback_RenderObject, &engine_ctx);
 
         // if (num_ros_used < ro_count)
@@ -817,7 +814,7 @@ namespace dmRive
     {
         //DM_PROFILE(RiveModel, "UpdateTransforms");
 
-        dmArray<RiveComponent*>& components = world->m_Components.m_Objects;
+        dmArray<RiveComponent*>& components = world->m_Components.GetRawObjects();
         uint32_t n = components.Size();
         for (uint32_t i = 0; i < n; ++i)
         {
@@ -919,7 +916,7 @@ namespace dmRive
         // rive::Renderer* rive_renderer = (rive::Renderer*) renderer;
         float dt = params.m_UpdateContext->m_DT;
 
-        dmArray<RiveComponent*>& components = world->m_Components.m_Objects;
+        dmArray<RiveComponent*>& components = world->m_Components.GetRawObjects();
         const uint32_t count = components.Size();
 
         for (uint32_t i = 0; i < count; ++i)
@@ -1084,7 +1081,7 @@ namespace dmRive
         RiveWorld* world = (RiveWorld*)params.m_World;
         dmRive::DefoldTessRenderer* renderer = world->m_Renderer;
 
-        dmArray<RiveComponent*>& components = world->m_Components.m_Objects;
+        dmArray<RiveComponent*>& components = world->m_Components.GetRawObjects();
         const uint32_t count = components.Size();
         if (!count)
         {
@@ -1556,7 +1553,7 @@ namespace dmRive
     static void ResourceReloadedCallback(const dmResource::ResourceReloadedParams& params)
     {
         RiveWorld* world = (RiveWorld*) params.m_UserData;
-        dmArray<RiveComponent*>& components = world->m_Components.m_Objects;
+        dmArray<RiveComponent*>& components = world->m_Components.GetRawObjects();
         uint32_t n = components.Size();
         for (uint32_t i = 0; i < n; ++i)
         {
