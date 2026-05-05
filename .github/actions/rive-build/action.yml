@@ -53,7 +53,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        RIVE_TMP_DIR=$(mktemp -d)
+        if [[ "${{ inputs.platform }}" == *-win32 ]]; then
+          short_root="/c/rive-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "${short_root}"
+          mkdir -p "${short_root}"
+          RIVE_TMP_DIR="$(cd "${short_root}" && pwd -P)"
+        else
+          RIVE_TMP_DIR=$(mktemp -d)
+        fi
         echo "RIVE_ROOT=${RIVE_TMP_DIR}" >> "$GITHUB_ENV"
         url="${{ inputs.rive_repo_url }}"
         ref="${{ inputs.rive_ref }}"
