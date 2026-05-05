@@ -220,6 +220,7 @@ if(${TARGET_PLATFORM} MATCHES "win32")
     set(ENGINE_LIBS
         libddf
         libdlib
+        libimage
         libprofile_null
         librender
     )
@@ -259,10 +260,10 @@ if(${TARGET_PLATFORM} MATCHES "win32")
 
     if(WITH_VULKAN)
         list(APPEND GRAPHICS_LIBS libgraphics_vulkan platform_vulkan)
-        target_link_libraries(viewer PRIVATE Iphlpapi.lib libglfw3 ws2_32 vulkan-1)
+        target_link_libraries(viewer PRIVATE Iphlpapi.lib libglfw3 ws2_32 bcrypt.lib vulkan-1)
     elseif(WITH_OPENGL)
         list(APPEND GRAPHICS_LIBS libgraphics platform)
-        target_link_libraries(viewer PRIVATE Iphlpapi.lib libglfw3 ws2_32 opengl32)
+        target_link_libraries(viewer PRIVATE Iphlpapi.lib libglfw3 ws2_32 bcrypt.lib opengl32)
     else()
         message(FATAL_ERROR "No Windows viewer backend selected")
     endif()

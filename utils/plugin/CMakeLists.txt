@@ -339,6 +339,7 @@ target_include_directories(rive_plugin PRIVATE
 if(TARGET_PLATFORM MATCHES "win32")
     set(ENGINE_LIBS
         libdlib
+        libimage
         libzip
         libmbedtls
         libddf
@@ -388,10 +389,10 @@ set(GRAPHICS_LIBS "")
 if(TARGET_PLATFORM MATCHES "win32")
     if(WITH_VULKAN)
         list(APPEND GRAPHICS_LIBS platform_vulkan libgraphics_vulkan)
-        set(SYSTEM_LIBS Iphlpapi.lib ws2_32 vulkan-1)
+        set(SYSTEM_LIBS Iphlpapi.lib ws2_32 bcrypt.lib vulkan-1)
     else()
         list(APPEND GRAPHICS_LIBS platform libgraphics)
-        set(SYSTEM_LIBS Iphlpapi.lib ws2_32 opengl32)
+        set(SYSTEM_LIBS Iphlpapi.lib ws2_32 bcrypt.lib opengl32)
     endif()
 else()
     if(TARGET_PLATFORM MATCHES "linux")
