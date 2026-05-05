@@ -207,7 +207,9 @@ runs:
             build_args+=("${supported_premake_options[@]}")
 
             msbuild_target_arg="$(IFS=';'; echo "${library_targets[*]}")"
-            msbuild_target_arg="/t:${msbuild_target_arg}"
+            # Use the dash form on Git Bash/Windows so MSYS does not rewrite /t:...
+            # before MSBuild sees it.
+            msbuild_target_arg="-t:${msbuild_target_arg}"
 
             echo "Vanilla build command lines:"
             echo "  cd renderer"
