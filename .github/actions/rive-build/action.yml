@@ -172,7 +172,6 @@ runs:
           --with_rive_layout
           --with_rive_canvas
           --with_rive_tools
-          --with_rive_audio=external
           --with_rive_scripting
           --toolset=${premake_toolset}
         )
