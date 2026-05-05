@@ -38,7 +38,7 @@ inputs:
     required: false
     default: ""
   build_mode:
-    description: Build mode (`patched` uses utils/rive-runtime/build.sh, `vanilla` uses build/build_rive.sh directly when supported)
+    description: Build mode (`patched` uses utils/rive-runtime/build.sh, `vanilla` drives the upstream renderer workspace directly with Premake + MSBuild on Windows)
     required: false
     default: "patched"
   with_vulkan:
@@ -129,35 +129,64 @@ runs:
       run: |
         set -euo pipefail
 
+        premake_toolset=clang
         if [[ "$INPUT_PLATFORM" != "x86_64-win32" && "$INPUT_PLATFORM" != "x86-win32" ]]; then
           echo "error: build_mode=vanilla is currently only supported for win32 platforms" >&2
           exit 1
         fi
+        premake_toolset=msc
 
-        build_args=(release clean --with_rive_scripting)
+        if ! command -v make >/dev/null 2>&1; then
+          echo "error: make is required for renderer shader generation on Windows. Ensure the workflow installs it before invoking build_mode=vanilla." >&2
+          exit 1
+        fi
+
+        premake_repo="${RIVE_ROOT}/build/dependencies/premake-core"
+        premake_exe="${premake_repo}/bin/release/premake5.exe"
+        premake_tag="v5.0.0-beta7"
+
+        if [[ ! -x "${premake_exe}" ]]; then
+          rm -rf "${premake_repo}"
+          echo "Bootstrapping Premake ${premake_tag} into ${premake_repo}"
+          git clone --depth 1 --branch "${premake_tag}" https://github.com/premake/premake-core.git "${premake_repo}"
+          (
+            cd "${premake_repo}"
+            cmd //c Bootstrap.bat
+          )
+        fi
+
+        export PREMAKE_PATH="${RIVE_ROOT}/build"
+
+        build_args=(
+          vs2022
+          --config=release
+          --out=out/release
+          --with_rive_text
+          --with_rive_layout
+          --with_rive_canvas
+          --with_rive_tools
+          --with_rive_audio=external
+          --with_rive_scripting
+          --toolset=${premake_toolset}
+        )
         if [ "$INPUT_WITH_VULKAN" = "true" ]; then
           build_args+=(--with_vulkan)
         fi
-        build_args+=(
-          --
-          rive
-          rive_pls_renderer
-          rive_decoders
-          rive_harfbuzz
-          rive_sheenbidi
-          rive_yoga
-          miniaudio
-          zlib
-          libpng
-          libjpeg
-          libwebp
-          luau_vm
-        )
 
-        echo "Running (in ${RIVE_ROOT}/renderer): ../build/build_rive.sh ${build_args[*]}"
+        echo "Vanilla build command lines:"
+        echo "  cd renderer"
+        echo "  export PREMAKE_PATH=\"\$PWD/../build\""
+        printf '  ../build/dependencies/premake-core/bin/release/premake5.exe'
+        for arg in "${build_args[@]}"; do
+          printf ' %q' "${arg}"
+        done
+        printf '\n'
+        echo "  MSBuild.exe ./out/release/rive.sln -m"
+
         (
           cd "${RIVE_ROOT}/renderer"
-          ../build/build_rive.sh "${build_args[@]}"
+          "${premake_exe}" "${build_args[@]}"
+          MSBuild.exe ./out/release/rive.sln -m
         )
 
     - name: Install Rive Runtime (vanilla)
@@ -180,6 +209,9 @@ runs:
 
         "${repo_root}/utils/rive-runtime/buildscripts/build_headers.sh" --prefix "${prefix}" --root "${RIVE_ROOT}"
         "${repo_root}/utils/rive-runtime/buildscripts/build_version_header.sh" "${version_header}" "${RIVE_ROOT}"
+
+        echo "Libraries produced in ${runtime_out_dir}:"
+        find "${runtime_out_dir}" -maxdepth 1 -type f \( -name '*.lib' -o -name '*.a' \) | sort
 
         found_libs=0
         for ext in lib a; do

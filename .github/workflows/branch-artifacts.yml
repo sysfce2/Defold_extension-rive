@@ -408,11 +408,15 @@ jobs:
           glslangValidator --version
           spirv-opt --version
 
-      - name: Install DirectX Shader Compiler (DXC)
+      - name: Install DirectX Shader Compiler (DXC) and make
         shell: bash
         run: |
           set -euo pipefail
+          choco install make -y || true
           choco install directxshadercompiler -y || true
+          export PATH="/c/ProgramData/chocolatey/bin:${PATH}"
+          echo "/c/ProgramData/chocolatey/bin" >> "$GITHUB_PATH"
+          make --version
           dxc.exe -version 2> /dev/null || true
 
       - name: Build, (optionally) upload, and commit
