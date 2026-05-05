@@ -179,6 +179,23 @@ runs:
           build_args+=(--with_vulkan)
         fi
 
+        msbuild_targets=(
+          rive
+          rive_pls_renderer
+          rive_decoders
+          rive_harfbuzz
+          rive_sheenbidi
+          rive_yoga
+          luau_vm
+          miniaudio
+          zlib
+          libpng
+          libjpeg
+          libwebp
+        )
+        msbuild_target_arg="$(IFS=';'; echo "${msbuild_targets[*]}")"
+        msbuild_target_arg="/t:${msbuild_target_arg}"
+
         echo "Vanilla build command lines:"
         echo "  cd renderer"
         echo "  export PREMAKE_PATH=\"\$PWD/../build\""
@@ -187,12 +204,12 @@ runs:
           printf ' %q' "${arg}"
         done
         printf '\n'
-        echo "  MSBuild.exe ./out/release/rive.sln -m"
+        printf '  MSBuild.exe ./out/release/rive.sln -m %q\n' "${msbuild_target_arg}"
 
         (
           cd "${RIVE_ROOT}/renderer"
           "${premake_exe}" "${build_args[@]}"
-          MSBuild.exe ./out/release/rive.sln -m
+          MSBuild.exe ./out/release/rive.sln -m "${msbuild_target_arg}"
         )
 
     - name: Install Rive Runtime (vanilla)
