@@ -306,8 +306,8 @@ runs:
                 echo "error: failed to resolve MSBuild solution configuration" >&2
                 exit 1
               fi
-              msbuild_configuration="${msbuild_config[0]}"
-              msbuild_platform="${msbuild_config[1]}"
+              msbuild_configuration="${msbuild_config[0]//$'\r'/}"
+              msbuild_platform="${msbuild_config[1]//$'\r'/}"
               msbuild_props=(
                 -p:Configuration="${msbuild_configuration}"
                 -p:Platform="${msbuild_platform}"
