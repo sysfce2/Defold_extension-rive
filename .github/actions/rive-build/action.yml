@@ -188,10 +188,6 @@ runs:
             fi
 
             export PREMAKE_PATH="${RIVE_ROOT}/build"
-            case "$INPUT_PLATFORM" in
-              x86_64-win32) msbuild_platform=x64 ;;
-              x86-win32) msbuild_platform=Win32 ;;
-            esac
 
             build_args=(
               vs2022
@@ -211,12 +207,6 @@ runs:
             # Use the dash form on Git Bash/Windows so MSYS does not rewrite /t:...
             # before MSBuild sees it.
             msbuild_target_arg="-t:${msbuild_target_arg}"
-            msbuild_props=(
-              -p:Configuration=Release
-              -p:Platform="${msbuild_platform}"
-              -p:DebugInformationFormat=None
-              -p:GenerateDebugInformation=false
-            )
 
             echo "Vanilla build command lines:"
             echo "  cd renderer"
@@ -226,11 +216,6 @@ runs:
               printf ' %q' "${arg}"
             done
             printf '\n'
-            printf '  MSBuild.exe ./out/release/rive.sln -m'
-            for arg in "${msbuild_props[@]}"; do
-              printf ' %q' "${arg}"
-            done
-            printf ' %q\n' "${msbuild_target_arg}"
 
             (
               cd "${RIVE_ROOT}/renderer"
@@ -260,6 +245,79 @@ runs:
                 tree.write(path, encoding="utf-8", xml_declaration=True)
                 print(f"Disabled compiler debug info in {path}")
         PY
+              mapfile -t msbuild_config < <(INPUT_PLATFORM="${INPUT_PLATFORM}" python3 - <<'PY'
+        from pathlib import Path
+        import os
+        import sys
+
+        solution = Path("out/release/rive.sln")
+        configs = []
+        in_section = False
+        for raw_line in solution.read_text(errors="replace").splitlines():
+            line = raw_line.strip()
+            if line.startswith("GlobalSection(SolutionConfigurationPlatforms)"):
+                in_section = True
+                continue
+            if in_section and line.startswith("EndGlobalSection"):
+                break
+            if in_section and "=" in line:
+                config_platform = line.split("=", 1)[0].strip()
+                if "|" in config_platform:
+                    configs.append(config_platform.split("|", 1))
+
+        platform_preferences = {
+            "x86_64-win32": ["x64", "Win64"],
+            "x86-win32": ["Win32", "x86"],
+        }
+        config_preferences = ["release", "Release", "RELEASE"]
+        input_platform = os.environ["INPUT_PLATFORM"]
+
+        for platform in platform_preferences[input_platform]:
+            for config in config_preferences:
+                for actual_config, actual_platform in configs:
+                    if actual_config == config and actual_platform == platform:
+                        print(actual_config)
+                        print(actual_platform)
+                        sys.exit(0)
+
+        for platform in platform_preferences[input_platform]:
+            for actual_config, actual_platform in configs:
+                if actual_config.lower() == "release" and actual_platform == platform:
+                    print(actual_config)
+                    print(actual_platform)
+                    sys.exit(0)
+
+        for actual_config, actual_platform in configs:
+            if actual_config.lower() == "release":
+                print(actual_config)
+                print(actual_platform)
+                sys.exit(0)
+
+        print("error: failed to find a release MSBuild solution configuration in out/release/rive.sln", file=sys.stderr)
+        print("Available solution configurations:", file=sys.stderr)
+        for actual_config, actual_platform in configs:
+            print(f"  {actual_config}|{actual_platform}", file=sys.stderr)
+        sys.exit(1)
+        PY
+              )
+              if [[ "${#msbuild_config[@]}" -ne 2 ]]; then
+                echo "error: failed to resolve MSBuild solution configuration" >&2
+                exit 1
+              fi
+              msbuild_configuration="${msbuild_config[0]}"
+              msbuild_platform="${msbuild_config[1]}"
+              msbuild_props=(
+                -p:Configuration="${msbuild_configuration}"
+                -p:Platform="${msbuild_platform}"
+                -p:DebugInformationFormat=None
+                -p:GenerateDebugInformation=false
+              )
+              echo "Using MSBuild solution configuration: ${msbuild_configuration}|${msbuild_platform}"
+              printf '  MSBuild.exe ./out/release/rive.sln -m'
+              for arg in "${msbuild_props[@]}"; do
+                printf ' %q' "${arg}"
+              done
+              printf ' %q\n' "${msbuild_target_arg}"
               MSBuild.exe ./out/release/rive.sln -m "${msbuild_props[@]}" "${msbuild_target_arg}"
             )
             ;;
