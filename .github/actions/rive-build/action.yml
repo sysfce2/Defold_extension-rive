@@ -188,6 +188,10 @@ runs:
             fi
 
             export PREMAKE_PATH="${RIVE_ROOT}/build"
+            case "$INPUT_PLATFORM" in
+              x86_64-win32) msbuild_platform=x64 ;;
+              x86-win32) msbuild_platform=Win32 ;;
+            esac
 
             build_args=(
               vs2022
@@ -196,10 +200,7 @@ runs:
               --toolset=msc
             )
             supported_premake_options=()
-            add_supported_premake_option with_rive_text --with_rive_text
-            add_supported_premake_option with_rive_layout --with_rive_layout
-            add_supported_premake_option with_rive_canvas --with_rive_canvas
-            add_supported_premake_option with_rive_tools --with_rive_tools
+            add_supported_premake_option no-lto --no-lto
             add_supported_premake_option with_rive_scripting --with_rive_scripting
             if [ "$INPUT_WITH_VULKAN" = "true" ]; then
               add_supported_premake_option with_vulkan --with_vulkan
@@ -210,6 +211,12 @@ runs:
             # Use the dash form on Git Bash/Windows so MSYS does not rewrite /t:...
             # before MSBuild sees it.
             msbuild_target_arg="-t:${msbuild_target_arg}"
+            msbuild_props=(
+              -p:Configuration=Release
+              -p:Platform="${msbuild_platform}"
+              -p:DebugInformationFormat=None
+              -p:GenerateDebugInformation=false
+            )
 
             echo "Vanilla build command lines:"
             echo "  cd renderer"
@@ -219,12 +226,41 @@ runs:
               printf ' %q' "${arg}"
             done
             printf '\n'
-            printf '  MSBuild.exe ./out/release/rive.sln -m %q\n' "${msbuild_target_arg}"
+            printf '  MSBuild.exe ./out/release/rive.sln -m'
+            for arg in "${msbuild_props[@]}"; do
+              printf ' %q' "${arg}"
+            done
+            printf ' %q\n' "${msbuild_target_arg}"
 
             (
               cd "${RIVE_ROOT}/renderer"
               "${premake_exe}" "${build_args[@]}"
-              MSBuild.exe ./out/release/rive.sln -m "${msbuild_target_arg}"
+              python3 - <<'PY'
+        from pathlib import Path
+        import xml.etree.ElementTree as ET
+
+        namespace = "http://schemas.microsoft.com/developer/msbuild/2003"
+        ET.register_namespace("", namespace)
+
+        def child(parent, name):
+            return parent.find(f"{{{namespace}}}{name}")
+
+        for path in sorted(Path("out/release").glob("*.vcxproj")):
+            tree = ET.parse(path)
+            root = tree.getroot()
+            changed = False
+            for cl_compile in root.findall(f".//{{{namespace}}}ClCompile"):
+                debug_format = child(cl_compile, "DebugInformationFormat")
+                if debug_format is None:
+                    debug_format = ET.SubElement(cl_compile, f"{{{namespace}}}DebugInformationFormat")
+                if debug_format.text != "None":
+                    debug_format.text = "None"
+                    changed = True
+            if changed:
+                tree.write(path, encoding="utf-8", xml_declaration=True)
+                print(f"Disabled compiler debug info in {path}")
+        PY
+              MSBuild.exe ./out/release/rive.sln -m "${msbuild_props[@]}" "${msbuild_target_arg}"
             )
             ;;
 
@@ -251,10 +287,6 @@ runs:
               release
             )
             supported_premake_options=()
-            add_supported_premake_option with_rive_text --with_rive_text
-            add_supported_premake_option with_rive_layout --with_rive_layout
-            add_supported_premake_option with_rive_canvas --with_rive_canvas
-            add_supported_premake_option with_rive_tools --with_rive_tools
             add_supported_premake_option with_rive_scripting --with_rive_scripting
             if [[ "$INPUT_PLATFORM" == *-linux ]]; then
               add_supported_premake_option no-lto --no-lto
@@ -347,6 +379,26 @@ runs:
               continue
             fi
             cp -f "${src}" "${install_dir}/"
+            if [[ "${INPUT_PLATFORM}" == *-win32 ]]; then
+              copied_lib="${install_dir}/$(basename "${src}")"
+              strip_tool=""
+              if command -v llvm-strip >/dev/null 2>&1; then
+                strip_tool="llvm-strip"
+              elif command -v llvm-strip.exe >/dev/null 2>&1; then
+                strip_tool="llvm-strip.exe"
+              fi
+              if [[ -n "${strip_tool}" ]]; then
+                before_size="$(wc -c < "${copied_lib}" | tr -d '[:space:]')"
+                if "${strip_tool}" --strip-debug "${copied_lib}"; then
+                  after_size="$(wc -c < "${copied_lib}" | tr -d '[:space:]')"
+                  echo "Stripped debug sections from $(basename "${copied_lib}"): ${before_size} -> ${after_size} bytes"
+                else
+                  echo "warning: ${strip_tool} failed for $(basename "${copied_lib}"); leaving it unstripped" >&2
+                fi
+              else
+                echo "warning: llvm-strip not found; leaving $(basename "${copied_lib}") unstripped" >&2
+              fi
+            fi
             found_libs=1
           done
         done
@@ -355,6 +407,24 @@ runs:
           echo "error: no .lib or .a files found in ${runtime_out_dir}" >&2
           exit 1
         fi
+
+        echo "Installed library sizes in ${install_dir}:"
+        for lib in "${install_dir}"/*; do
+          [[ -f "${lib}" ]] || continue
+          size="$(wc -c < "${lib}" | tr -d '[:space:]')"
+          echo "  $(basename "${lib}"): ${size} bytes"
+        done
+
+        max_github_blob_size=100000000
+        for lib in "${install_dir}"/*; do
+          [[ -f "${lib}" ]] || continue
+          size="$(wc -c < "${lib}" | tr -d '[:space:]')"
+          if (( size > max_github_blob_size )); then
+            echo "error: $(basename "${lib}") is ${size} bytes, which exceeds GitHub's 100 MB file limit." >&2
+            echo "error: remove debug info or reduce the built feature set before committing this artifact." >&2
+            exit 1
+          fi
+        done
 
     - name: Verify Luau VM library
       shell: bash
