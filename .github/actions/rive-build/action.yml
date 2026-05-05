@@ -38,7 +38,7 @@ inputs:
     required: false
     default: ""
   build_mode:
-    description: Build mode (`patched` uses utils/rive-runtime/build.sh, `vanilla` drives the upstream renderer workspace directly with Premake + MSBuild on Windows)
+    description: Build mode (`patched` uses utils/rive-runtime/build.sh, `vanilla` drives the upstream renderer workspace directly with Premake/Ninja or MSBuild)
     required: false
     default: "patched"
   with_vulkan:
@@ -136,50 +136,7 @@ runs:
       run: |
         set -euo pipefail
 
-        premake_toolset=clang
-        if [[ "$INPUT_PLATFORM" != "x86_64-win32" && "$INPUT_PLATFORM" != "x86-win32" ]]; then
-          echo "error: build_mode=vanilla is currently only supported for win32 platforms" >&2
-          exit 1
-        fi
-        premake_toolset=msc
-
-        if ! command -v make >/dev/null 2>&1; then
-          echo "error: make is required for renderer shader generation on Windows. Ensure the workflow installs it before invoking build_mode=vanilla." >&2
-          exit 1
-        fi
-
-        premake_repo="${RIVE_ROOT}/build/dependencies/premake-core"
-        premake_exe="${premake_repo}/bin/release/premake5.exe"
-        premake_tag="v5.0.0-beta7"
-
-        if [[ ! -x "${premake_exe}" ]]; then
-          rm -rf "${premake_repo}"
-          echo "Bootstrapping Premake ${premake_tag} into ${premake_repo}"
-          git clone --depth 1 --branch "${premake_tag}" https://github.com/premake/premake-core.git "${premake_repo}"
-          (
-            cd "${premake_repo}"
-            cmd //c Bootstrap.bat
-          )
-        fi
-
-        export PREMAKE_PATH="${RIVE_ROOT}/build"
-
-        build_args=(
-          vs2022
-          --config=release
-          --out=out/release
-          --with_rive_text
-          --with_rive_layout
-          --with_rive_canvas
-          --with_rive_tools
-          --with_rive_scripting
-          --toolset=${premake_toolset}
-        )
-        if [ "$INPUT_WITH_VULKAN" = "true" ]; then
-          build_args+=(--with_vulkan)
-        fi
-
-        msbuild_targets=(
+        library_targets=(
           rive
           rive_pls_renderer
           rive_decoders
@@ -193,24 +150,169 @@ runs:
           libjpeg
           libwebp
         )
-        msbuild_target_arg="$(IFS=';'; echo "${msbuild_targets[*]}")"
-        msbuild_target_arg="/t:${msbuild_target_arg}"
 
-        echo "Vanilla build command lines:"
-        echo "  cd renderer"
-        echo "  export PREMAKE_PATH=\"\$PWD/../build\""
-        printf '  ../build/dependencies/premake-core/bin/release/premake5.exe'
-        for arg in "${build_args[@]}"; do
-          printf ' %q' "${arg}"
-        done
-        printf '\n'
-        printf '  MSBuild.exe ./out/release/rive.sln -m %q\n' "${msbuild_target_arg}"
+        supported_premake_options=()
+        add_supported_premake_option() {
+          local trigger="$1"
+          local option="$2"
 
-        (
-          cd "${RIVE_ROOT}/renderer"
-          "${premake_exe}" "${build_args[@]}"
-          MSBuild.exe ./out/release/rive.sln -m "${msbuild_target_arg}"
-        )
+          if grep -R -E "trigger[[:space:]]*=[[:space:]]*['\"]${trigger}['\"]" \
+              "${RIVE_ROOT}/premake5_v2.lua" \
+              "${RIVE_ROOT}/renderer" \
+              "${RIVE_ROOT}/build/rive_build_config.lua" >/dev/null 2>&1; then
+            supported_premake_options+=("${option}")
+          else
+            echo "Skipping unsupported Premake option: ${option}"
+          fi
+        }
+
+        case "$INPUT_PLATFORM" in
+          x86_64-win32|x86-win32)
+            if ! command -v make >/dev/null 2>&1; then
+              echo "error: make is required for renderer shader generation on Windows. Ensure the workflow installs it before invoking build_mode=vanilla." >&2
+              exit 1
+            fi
+
+            premake_repo="${RIVE_ROOT}/build/dependencies/premake-core"
+            premake_exe="${premake_repo}/bin/release/premake5.exe"
+            premake_tag="v5.0.0-beta7"
+
+            if [[ ! -x "${premake_exe}" ]]; then
+              rm -rf "${premake_repo}"
+              echo "Bootstrapping Premake ${premake_tag} into ${premake_repo}"
+              git clone --depth 1 --branch "${premake_tag}" https://github.com/premake/premake-core.git "${premake_repo}"
+              (
+                cd "${premake_repo}"
+                cmd //c Bootstrap.bat
+              )
+            fi
+
+            export PREMAKE_PATH="${RIVE_ROOT}/build"
+
+            build_args=(
+              vs2022
+              --config=release
+              --out=out/release
+              --toolset=msc
+            )
+            supported_premake_options=()
+            add_supported_premake_option with_rive_text --with_rive_text
+            add_supported_premake_option with_rive_layout --with_rive_layout
+            add_supported_premake_option with_rive_canvas --with_rive_canvas
+            add_supported_premake_option with_rive_tools --with_rive_tools
+            add_supported_premake_option with_rive_scripting --with_rive_scripting
+            if [ "$INPUT_WITH_VULKAN" = "true" ]; then
+              add_supported_premake_option with_vulkan --with_vulkan
+            fi
+            build_args+=("${supported_premake_options[@]}")
+
+            msbuild_target_arg="$(IFS=';'; echo "${library_targets[*]}")"
+            msbuild_target_arg="/t:${msbuild_target_arg}"
+
+            echo "Vanilla build command lines:"
+            echo "  cd renderer"
+            echo "  export PREMAKE_PATH=\"\$PWD/../build\""
+            printf '  ../build/dependencies/premake-core/bin/release/premake5.exe'
+            for arg in "${build_args[@]}"; do
+              printf ' %q' "${arg}"
+            done
+            printf '\n'
+            printf '  MSBuild.exe ./out/release/rive.sln -m %q\n' "${msbuild_target_arg}"
+
+            (
+              cd "${RIVE_ROOT}/renderer"
+              "${premake_exe}" "${build_args[@]}"
+              MSBuild.exe ./out/release/rive.sln -m "${msbuild_target_arg}"
+            )
+            ;;
+
+          x86_64-linux|arm64-linux|x86_64-macos|arm64-macos)
+            if ! command -v ninja >/dev/null 2>&1; then
+              echo "error: ninja is required for build_mode=vanilla on ${INPUT_PLATFORM}" >&2
+              exit 1
+            fi
+
+            case "$INPUT_PLATFORM" in
+              x86_64-linux|x86_64-macos) rive_arch=x64 ;;
+              arm64-linux|arm64-macos) rive_arch=arm64 ;;
+            esac
+
+            build_script="${RIVE_ROOT}/build/build_rive.sh"
+            if [[ ! -x "${build_script}" ]]; then
+              chmod +x "${build_script}"
+            fi
+
+            build_args=(
+              nobuild
+              ninja
+              "${rive_arch}"
+              release
+            )
+            supported_premake_options=()
+            add_supported_premake_option with_rive_text --with_rive_text
+            add_supported_premake_option with_rive_layout --with_rive_layout
+            add_supported_premake_option with_rive_canvas --with_rive_canvas
+            add_supported_premake_option with_rive_tools --with_rive_tools
+            add_supported_premake_option with_rive_scripting --with_rive_scripting
+            if [[ "$INPUT_PLATFORM" == *-linux ]]; then
+              add_supported_premake_option no-lto --no-lto
+              add_supported_premake_option with-pic --with-pic
+            fi
+            if [ "$INPUT_WITH_VULKAN" = "true" ]; then
+              add_supported_premake_option with_vulkan --with_vulkan
+            fi
+            build_args+=("${supported_premake_options[@]}")
+
+            echo "Vanilla build command lines:"
+            echo "  cd renderer"
+            printf '  RIVE_OUT=out/release ../build/build_rive.sh'
+            for arg in "${build_args[@]}"; do
+              printf ' %q' "${arg}"
+            done
+            printf '\n'
+
+            (
+              cd "${RIVE_ROOT}/renderer"
+              RIVE_OUT=out/release "${build_script}" "${build_args[@]}"
+
+              ninja -C out/release -t targets all > out/release/ninja-targets.txt
+              resolved_targets=()
+              for target in "${library_targets[@]}"; do
+                candidates=(
+                  "${target}"
+                  "lib${target}.a"
+                  "${target}.a"
+                )
+                resolved_target=""
+                for candidate in "${candidates[@]}"; do
+                  if grep -Eq "^${candidate}:" out/release/ninja-targets.txt; then
+                    resolved_target="${candidate}"
+                    break
+                  fi
+                done
+                if [[ -z "${resolved_target}" ]]; then
+                  echo "error: failed to resolve Ninja target for ${target}" >&2
+                  echo "Available targets:" >&2
+                  sed -n '1,160p' out/release/ninja-targets.txt >&2
+                  exit 1
+                fi
+                resolved_targets+=("${resolved_target}")
+              done
+
+              printf '  ninja -C out/release'
+              for target in "${resolved_targets[@]}"; do
+                printf ' %q' "${target}"
+              done
+              printf '\n'
+              ninja -C out/release "${resolved_targets[@]}"
+            )
+            ;;
+
+          *)
+            echo "error: build_mode=vanilla is not supported for ${INPUT_PLATFORM}" >&2
+            exit 1
+            ;;
+        esac
 
     - name: Install Rive Runtime (vanilla)
       if: ${{ inputs.build_mode == 'vanilla' }}

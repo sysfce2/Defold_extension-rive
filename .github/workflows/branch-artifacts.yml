@@ -159,12 +159,12 @@ jobs:
             echo "${cache_dir}" >> "$GITHUB_PATH"
           fi
 
-      - name: Install Linux build dependencies (uuid, X11, Xcursor, Xrandr, Xi, Xinerama, Xf86VidMode, glslang, spirv-tools)
+      - name: Install Linux build dependencies (uuid, X11, Xcursor, Xrandr, Xi, Xinerama, Xf86VidMode, glslang, spirv-tools, ninja)
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y uuid-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libxxf86vm-dev glslang-tools spirv-tools
+          sudo apt-get install -y uuid-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libxxf86vm-dev glslang-tools spirv-tools ninja-build
 
       - name: Ensure spirv-opt supports --preserve-interface
         shell: bash
@@ -229,6 +229,7 @@ jobs:
           commit_message: ${{ inputs.commit_message }}
           push_changes: ${{ inputs.push_changes }}
           target_branch: ${{ inputs.target_branch || github.ref_name }}
+          build_mode: vanilla
           with_vulkan: true
 
   build-macos:
@@ -249,6 +250,13 @@ jobs:
         with:
           xcode-version: '16.2'
 
+      - name: Install macOS build dependencies
+        if: ${{ matrix.platform == 'arm64-macos' || matrix.platform == 'x86_64-macos' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install ninja
+
       - name: Build, (optionally) upload, and commit
         uses: ./.github/actions/rive-build
         with:
@@ -261,6 +269,7 @@ jobs:
           commit_message: ${{ inputs.commit_message }}
           push_changes: ${{ inputs.push_changes }}
           target_branch: ${{ inputs.target_branch || github.ref_name }}
+          build_mode: ${{ (matrix.platform == 'arm64-macos' || matrix.platform == 'x86_64-macos') && 'vanilla' || 'patched' }}
 
   build-android:
     if: ${{ inputs.platform == 'arm64-android' || inputs.platform == 'armv7-android' || inputs.platform == 'all' }}
