@@ -263,7 +263,8 @@ runs:
             if in_section and "=" in line:
                 config_platform = line.split("=", 1)[0].strip()
                 if "|" in config_platform:
-                    configs.append(config_platform.split("|", 1))
+                    actual_config, actual_platform = config_platform.split("|", 1)
+                    configs.append([actual_config.strip(), actual_platform.strip()])
 
         platform_preferences = {
             "x86_64-win32": ["x64", "Win64"],
