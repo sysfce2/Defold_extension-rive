@@ -538,8 +538,8 @@ jobs:
           target_branch="${{ inputs.target_branch || github.ref_name }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -v defold-rive/plugins/lib/arm64-macos \
-                     defold-rive/plugins/lib/x86_64-macos || true
+          git add -v defold-rive/plugins/lib/arm64-osx \
+                     defold-rive/plugins/lib/x86_64-osx || true
           if git diff --cached --quiet; then
             echo "No plugin changes to commit."
             exit 0

@@ -197,6 +197,10 @@ runs:
             )
             supported_premake_options=()
             add_supported_premake_option no-lto --no-lto
+            add_supported_premake_option with_rive_text --with_rive_text
+            add_supported_premake_option with_rive_layout --with_rive_layout
+            add_supported_premake_option with_rive_canvas --with_rive_canvas
+            add_supported_premake_option with_rive_tools --with_rive_tools
             add_supported_premake_option with_rive_scripting --with_rive_scripting
             if [ "$INPUT_WITH_VULKAN" = "true" ]; then
               add_supported_premake_option with_vulkan --with_vulkan
@@ -347,6 +351,10 @@ runs:
               release
             )
             supported_premake_options=()
+            add_supported_premake_option with_rive_text --with_rive_text
+            add_supported_premake_option with_rive_layout --with_rive_layout
+            add_supported_premake_option with_rive_canvas --with_rive_canvas
+            add_supported_premake_option with_rive_tools --with_rive_tools
             add_supported_premake_option with_rive_scripting --with_rive_scripting
             if [[ "$INPUT_PLATFORM" == *-linux ]]; then
               add_supported_premake_option no-lto --no-lto
@@ -418,7 +426,12 @@ runs:
 
         repo_root="$(pwd -P)"
         prefix="${repo_root}/defold-rive"
-        install_dir="${prefix}/lib/${INPUT_PLATFORM}"
+        install_platform="${INPUT_PLATFORM}"
+        case "${INPUT_PLATFORM}" in
+          arm64-macos) install_platform="arm64-osx" ;;
+          x86_64-macos) install_platform="x86_64-osx" ;;
+        esac
+        install_dir="${prefix}/lib/${install_platform}"
         version_header="${prefix}/include/defold/rive_version.h"
         runtime_out_dir="${RIVE_ROOT}/renderer/out/release"
 
@@ -493,7 +506,12 @@ runs:
       run: |
         set -euo pipefail
 
-        lib_dir="defold-rive/lib/${INPUT_PLATFORM}"
+        install_platform="${INPUT_PLATFORM}"
+        case "${INPUT_PLATFORM}" in
+          arm64-macos) install_platform="arm64-osx" ;;
+          x86_64-macos) install_platform="x86_64-osx" ;;
+        esac
+        lib_dir="defold-rive/lib/${install_platform}"
         if [[ "${INPUT_PLATFORM}" == *-win32 ]]; then
           luau_lib="${lib_dir}/luau_vm.lib"
         else
