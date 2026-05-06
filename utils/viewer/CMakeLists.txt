@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 project(viewer LANGUAGES CXX)
+if(POLICY CMP0156)
+    cmake_policy(SET CMP0156 NEW)
+endif()
+if(POLICY CMP0179)
+    cmake_policy(SET CMP0179 NEW)
+endif()
+
 include(CheckCXXCompilerFlag)
 
 set(DYNAMO_HOME $ENV{DYNAMO_HOME})
@@ -251,10 +258,6 @@ set(RIVE_RUNTIME_LIBS
 
 set(SYSTEM_LIBS "")
 set(GRAPHICS_LIBS "")
-if(WITH_METAL)
-    # macOS viewer uses the Metal renderer path, backed by Defold's Vulkan bridge.
-    list(APPEND GRAPHICS_LIBS MoltenVK)
-endif()
 
 if(${TARGET_PLATFORM} MATCHES "win32")
     target_compile_definitions(viewer PRIVATE DM_PLATFORM_WINDOWS RIVE_WINDOWS)
