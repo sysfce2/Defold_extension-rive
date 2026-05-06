@@ -357,6 +357,7 @@ if(TARGET_PLATFORM MATCHES "win32")
 else()
     set(ENGINE_LIBS
         dlib
+        image
         mbedtls
         ddf
         profile_null

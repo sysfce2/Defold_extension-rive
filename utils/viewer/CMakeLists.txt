@@ -228,6 +228,7 @@ else()
     set(ENGINE_LIBS
         ddf
         dlib
+        image
         profile_null
         render
     )
