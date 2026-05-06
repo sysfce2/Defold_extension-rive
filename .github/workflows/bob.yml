@@ -21,8 +21,7 @@ jobs:
 
   build:
     needs: check_shared_dependencies
-    uses: defold/github-actions-common/.github/workflows/bob.yml@master
+    uses: defold/github-actions-common/.github/workflows/bob.yml@bob-url-support
     with:
-      channel: bob-version-unpack-fix
-      bob_version_filename: info.json
+      bob_jar_url: http://d.defold.com/archive/dev/82fdf63f2343eddabdb3e4312cca33078a5923fe/bob/bob.jar
       ignored_platforms: '[{"platform": "armv7-android"}, {"platform": "x86-win32"}]'
