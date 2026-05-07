@@ -20,6 +20,8 @@
 
 #include <common/commands.h>
 
+#include <rive/assets/script_asset.hpp>
+
 namespace dmRive
 {
 
@@ -117,6 +119,22 @@ static bool ShouldInstantiateDefaultViewModelInstance(const RiveFile* file)
 #endif
 }
 
+#if defined(DM_RIVE_FILE_META_DATA)
+static bool ShouldSkipMetadataArtboardInstantiation(RiveFile* file)
+{
+    bool has_script_asset = false;
+    if (dmRiveCommands::FileHasAssetType(file->m_File, rive::ScriptAsset::typeKey, &has_script_asset) &&
+        has_script_asset)
+    {
+        dmLogWarning("Rive file '%s' contains script assets; skipping state machine metadata discovery to avoid unsafe preview metadata loading",
+                     file->m_Path ? file->m_Path : "<unknown>");
+        return true;
+    }
+
+    return false;
+}
+#endif
+
 static void BindViewModelInstance(RiveFile* file, rive::rcp<rive::CommandQueue> queue)
 {
     if (!file || !queue)
@@ -179,7 +197,8 @@ RiveFile* LoadFileFromBuffer(const void* buffer, size_t buffer_size, const char*
     }
 
 #if defined(DM_RIVE_FILE_META_DATA)
-    RequestMetaData(out, queue);
+    out->m_SkipMetadataArtboardInstantiation = ShouldSkipMetadataArtboardInstantiation(out);
+    RequestMetaData(out, queue, out->m_SkipMetadataArtboardInstantiation);
 #endif
 
 #if defined(DM_RIVE_FILE_META_DATA)

@@ -20,6 +20,7 @@
 #include <dmsdk/dlib/time.h>
 
 #include <rive/artboard.hpp>
+#include <rive/assets/file_asset.hpp>
 #include <rive/factory.hpp>
 #include <rive/file.hpp>
 #include <rive/refcnt.hpp>
@@ -339,6 +340,49 @@ bool GetBounds(rive::ArtboardHandle artboard_handle, rive::AABB* out_bounds)
     }
 
     *out_bounds = bounds;
+    return true;
+}
+
+bool FileHasAssetType(rive::FileHandle file_handle, uint16_t type_key, bool* out_has_asset)
+{
+    if (out_has_asset != 0)
+    {
+        *out_has_asset = false;
+    }
+
+    if (g_Context == 0 || file_handle == RIVE_NULL_HANDLE || out_has_asset == 0)
+    {
+        return false;
+    }
+
+    bool found = false;
+    bool has_asset = false;
+    bool completed = RunOnServerAndWait(g_Context, [&](rive::CommandServer* server) {
+        rive::File* file = server->getFile(file_handle);
+        if (file == 0)
+        {
+            return;
+        }
+
+        found = true;
+        rive::Span<const rive::rcp<rive::FileAsset> > assets = file->assets();
+        for (size_t i = 0; i < assets.size(); ++i)
+        {
+            rive::FileAsset* asset = assets[i].get();
+            if (asset != 0 && asset->isTypeOf(type_key))
+            {
+                has_asset = true;
+                break;
+            }
+        }
+    });
+
+    if (!completed || !found)
+    {
+        return false;
+    }
+
+    *out_has_asset = has_asset;
     return true;
 }
 
