@@ -529,6 +529,7 @@ void InitFileMetaData(RiveFile* file)
     file->m_DefaultViewModelInfo.m_ViewModel = 0;
     file->m_DefaultViewModelInfo.m_Instance = 0;
     file->m_HasDefaultViewModelInfo = false;
+    file->m_SkipMetadataArtboardInstantiation = false;
     file->m_SelectedArtboardName = 0;
     file->m_ArtboardListener = new ArtboardMetadataListener(file);
 }
@@ -547,7 +548,7 @@ void DestroyFileMetaData(RiveFile* file)
     delete file->m_ArtboardListener;
 }
 
-void RequestMetaData(RiveFile* file, rive::rcp<rive::CommandQueue> queue)
+void RequestMetaData(RiveFile* file, rive::rcp<rive::CommandQueue> queue, bool skip_metadata_artboard_instantiation)
 {
     MetadataListener* listener = file->m_FileListener;
 
@@ -704,6 +705,12 @@ void RequestMetaData(RiveFile* file, rive::rcp<rive::CommandQueue> queue)
         delete view_model_listeners[i];
     }
 
+    if (skip_metadata_artboard_instantiation)
+    {
+        ClearArtboardStateMachines(file->m_StateMachinesByArtboard);
+        return;
+    }
+
     ClearArtboardStateMachines(file->m_StateMachinesByArtboard);
     uint32_t state_machines_completed_count = 0;
     bool artboard_error = false;
@@ -778,6 +785,10 @@ void RequestMetaData(RiveFile* file, rive::rcp<rive::CommandQueue> queue)
         state_machines_completed_count += file->m_Artboards.Size() - artboard_listeners.Size();
     }
 
+    for (uint32_t i = 0; i < artboards_to_delete.Size(); ++i)
+    {
+        dmRiveCommands::DisposeArtboardScripts(artboards_to_delete[i]);
+    }
     for (uint32_t i = 0; i < artboards_to_delete.Size(); ++i)
     {
         queue->deleteArtboard(artboards_to_delete[i]);

@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 project(viewer LANGUAGES CXX)
+if(POLICY CMP0156)
+    cmake_policy(SET CMP0156 NEW)
+endif()
+if(POLICY CMP0179)
+    cmake_policy(SET CMP0179 NEW)
+endif()
+
 include(CheckCXXCompilerFlag)
 
 set(DYNAMO_HOME $ENV{DYNAMO_HOME})
@@ -220,6 +227,7 @@ if(${TARGET_PLATFORM} MATCHES "win32")
     set(ENGINE_LIBS
         libddf
         libdlib
+        libimage
         libprofile_null
         librender
     )
@@ -227,6 +235,7 @@ else()
     set(ENGINE_LIBS
         ddf
         dlib
+        image
         profile_null
         render
     )
@@ -234,6 +243,7 @@ endif()
 
 set(RIVE_RUNTIME_LIBS
     rive
+    luau_vm
     rive_harfbuzz
     rive_pls_renderer
     rive_sheenbidi
@@ -248,20 +258,16 @@ set(RIVE_RUNTIME_LIBS
 
 set(SYSTEM_LIBS "")
 set(GRAPHICS_LIBS "")
-if(WITH_METAL)
-    # macOS viewer uses the Metal renderer path, backed by Defold's Vulkan bridge.
-    list(APPEND GRAPHICS_LIBS MoltenVK)
-endif()
 
 if(${TARGET_PLATFORM} MATCHES "win32")
     target_compile_definitions(viewer PRIVATE DM_PLATFORM_WINDOWS RIVE_WINDOWS)
 
     if(WITH_VULKAN)
         list(APPEND GRAPHICS_LIBS libgraphics_vulkan platform_vulkan)
-        target_link_libraries(viewer PRIVATE Iphlpapi.lib libglfw3 ws2_32 vulkan-1)
+        target_link_libraries(viewer PRIVATE Iphlpapi.lib libglfw3 ws2_32 bcrypt.lib vulkan-1)
     elseif(WITH_OPENGL)
         list(APPEND GRAPHICS_LIBS libgraphics platform)
-        target_link_libraries(viewer PRIVATE Iphlpapi.lib libglfw3 ws2_32 opengl32)
+        target_link_libraries(viewer PRIVATE Iphlpapi.lib libglfw3 ws2_32 bcrypt.lib opengl32)
     else()
         message(FATAL_ERROR "No Windows viewer backend selected")
     endif()

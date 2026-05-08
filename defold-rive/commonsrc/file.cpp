@@ -20,6 +20,8 @@
 
 #include <common/commands.h>
 
+#include <rive/assets/script_asset.hpp>
+
 namespace dmRive
 {
 
@@ -117,6 +119,22 @@ static bool ShouldInstantiateDefaultViewModelInstance(const RiveFile* file)
 #endif
 }
 
+#if defined(DM_RIVE_FILE_META_DATA)
+static bool ShouldSkipMetadataArtboardInstantiation(RiveFile* file)
+{
+    bool has_script_asset = false;
+    if (dmRiveCommands::FileHasAssetType(file->m_File, rive::ScriptAsset::typeKey, &has_script_asset) &&
+        has_script_asset)
+    {
+        dmLogWarning("Rive file '%s' contains script assets; skipping state machine metadata discovery to avoid unsafe preview metadata loading",
+                     file->m_Path ? file->m_Path : "<unknown>");
+        return true;
+    }
+
+    return false;
+}
+#endif
+
 static void BindViewModelInstance(RiveFile* file, rive::rcp<rive::CommandQueue> queue)
 {
     if (!file || !queue)
@@ -169,6 +187,7 @@ RiveFile* LoadFileFromBuffer(const void* buffer, size_t buffer_size, const char*
     {
         if (out->m_File != RIVE_NULL_HANDLE)
         {
+            dmRiveCommands::DisposeFileScripts(out->m_File);
             queue->deleteFile(out->m_File);
             dmRiveCommands::ProcessMessages();
             out->m_File = RIVE_NULL_HANDLE;
@@ -178,7 +197,8 @@ RiveFile* LoadFileFromBuffer(const void* buffer, size_t buffer_size, const char*
     }
 
 #if defined(DM_RIVE_FILE_META_DATA)
-    RequestMetaData(out, queue);
+    out->m_SkipMetadataArtboardInstantiation = ShouldSkipMetadataArtboardInstantiation(out);
+    RequestMetaData(out, queue, out->m_SkipMetadataArtboardInstantiation);
 #endif
 
 #if defined(DM_RIVE_FILE_META_DATA)
@@ -233,6 +253,14 @@ void DestroyFile(RiveFile* file)
         if (file->m_ViewModelInstance != RIVE_NULL_HANDLE)
         {
             queue->deleteViewModelInstance(file->m_ViewModelInstance);
+        }
+        if (file->m_Artboard != RIVE_NULL_HANDLE)
+        {
+            dmRiveCommands::DisposeArtboardScripts(file->m_Artboard);
+        }
+        if (file->m_File != RIVE_NULL_HANDLE)
+        {
+            dmRiveCommands::DisposeFileScripts(file->m_File);
         }
         if (file->m_Artboard != RIVE_NULL_HANDLE)
         {
@@ -314,6 +342,7 @@ void SetArtboard(RiveFile* file, const char* artboard)
     }
     if (file->m_Artboard != RIVE_NULL_HANDLE)
     {
+        dmRiveCommands::DisposeArtboardScripts(file->m_Artboard);
         queue->deleteArtboard(file->m_Artboard);
         file->m_Artboard = RIVE_NULL_HANDLE;
     }

@@ -19,11 +19,11 @@ package = com.defold.extensionrive
 [project]
 title = extension-rive
 bundle_exclude_resources = utils
-dependencies#0 = https://github.com/andsve/dirtylarry/archive/master.zip
+dependencies#0 = https://github.com/andsve/dirtylarry/archive/refs/heads/master.zip
 
 [library]
 include_dirs = defold-rive
-defold_min_version = 1.12.3
+defold_min_version = 1.13.0
 
 [graphics]
 max_draw_calls = 1024

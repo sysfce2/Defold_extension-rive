@@ -114,13 +114,7 @@ if [ -n "${PROTOC:-}" ] && [ -x "${PROTOC}" ]; then
     PROTOC_DIR="$(dirname "${PROTOC}")"
     export PATH="${PROTOC_DIR}:${PATH}"
     CMAKE_PROTOC_ARGS+=("-DPROTOC_EXECUTABLE=${PROTOC}")
-elif command -v protoc >/dev/null 2>&1; then
-    PROTOC_PATH="$(command -v protoc)"
-    PROTOC_DIR="$(dirname "${PROTOC_PATH}")"
-    export PATH="${PROTOC_DIR}:${PATH}"
-    CMAKE_PROTOC_ARGS+=("-DPROTOC_EXECUTABLE=${PROTOC_PATH}")
 else
-    #PROTOBUF_BIN="${REPO_ROOT}/build/bin/${HOST_PLATFORM}"
     PROTOBUF_BIN="${DYNAMO_HOME}/ext/bin/${HOST_PLATFORM}"
     if [ -d "${PROTOBUF_BIN}" ]; then
         export PATH="${PROTOBUF_BIN}:${PATH}"
@@ -129,6 +123,11 @@ else
         elif [ -x "${PROTOBUF_BIN}/protoc.exe" ]; then
             CMAKE_PROTOC_ARGS+=("-DPROTOC_EXECUTABLE=${PROTOBUF_BIN}/protoc.exe")
         fi
+    elif command -v protoc >/dev/null 2>&1; then
+        PROTOC_PATH="$(command -v protoc)"
+        PROTOC_DIR="$(dirname "${PROTOC_PATH}")"
+        export PATH="${PROTOC_DIR}:${PATH}"
+        CMAKE_PROTOC_ARGS+=("-DPROTOC_EXECUTABLE=${PROTOC_PATH}")
     else
         echo "Warning: protobuf bin directory not found at ${PROTOBUF_BIN}" >&2
         echo "build folder: ${REPO_ROOT}/build"
@@ -138,15 +137,25 @@ fi
 
 mkdir -p "${BUILD_DIR}"
 
-cmake -S "${SCRIPT_DIR}" -B "${BUILD_DIR}" \
-    -DTARGET_PLATFORM="${PLATFORM}" \
-    -DCMAKE_BUILD_TYPE="${CONFIG}" \
-    -DCMAKE_VERBOSE_MAKEFILE=ON \
-    -DCMAKE_C_COMPILER="${CMAKE_C_COMPILER}" \
-    -DCMAKE_CXX_COMPILER="${CMAKE_CXX_COMPILER}" \
-    -DWITH_VULKAN="${WITH_VULKAN}" \
-    "${CMAKE_PROTOC_ARGS[@]:-}" \
-    "${CMAKE_GENERATOR_FLAGS[@]:-}"
+CM_ARGS=(
+    -S "${SCRIPT_DIR}"
+    -B "${BUILD_DIR}"
+    -DTARGET_PLATFORM="${PLATFORM}"
+    -DCMAKE_BUILD_TYPE="${CONFIG}"
+    -DCMAKE_VERBOSE_MAKEFILE=ON
+    -DCMAKE_C_COMPILER="${CMAKE_C_COMPILER}"
+    -DCMAKE_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
+    -DWITH_VULKAN="${WITH_VULKAN}"
+)
+
+if [ ${#CMAKE_PROTOC_ARGS[@]} -gt 0 ]; then
+    CM_ARGS+=("${CMAKE_PROTOC_ARGS[@]}")
+fi
+if [ ${#CMAKE_GENERATOR_FLAGS[@]} -gt 0 ]; then
+    CM_ARGS+=("${CMAKE_GENERATOR_FLAGS[@]}")
+fi
+
+cmake "${CM_ARGS[@]}"
 
 cmake --build "${BUILD_DIR}" --config "${CONFIG}"
 

@@ -10,11 +10,15 @@ inputs:
     required: true
     default: https://github.com/rive-app/rive-runtime.git
   rive_ref:
-    description: Rive runtime ref (branch/tag)
+    description: Rive runtime ref (branch or other git ref)
+    required: false
+    default: ""
+  rive_tag:
+    description: Rive runtime GitHub release tag (for example runtime-v0.1.8)
     required: false
     default: ""
   rive_sha:
-    description: Rive runtime commit SHA (overrides ref)
+    description: Rive runtime commit SHA (overrides tag and ref)
     required: false
     default: ""
   upload_artifact:
@@ -29,8 +33,12 @@ inputs:
     description: Push changes back to the same branch
     required: true
     default: "true"
+  target_branch:
+    description: Branch to push committed changes to. Defaults to the workflow ref.
+    required: false
+    default: ""
   build_mode:
-    description: Build mode (`patched` uses utils/rive-runtime/build.sh, `vanilla` uses build/build_rive.sh directly when supported)
+    description: Build mode (`patched` uses utils/rive-runtime/build.sh, `vanilla` drives the upstream renderer workspace directly with Premake/Ninja or MSBuild)
     required: false
     default: "patched"
   with_vulkan:
@@ -45,20 +53,36 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        RIVE_TMP_DIR=$(mktemp -d)
+        if [[ "${{ inputs.platform }}" == *-win32 ]]; then
+          short_root="/c/rive-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "${short_root}"
+          mkdir -p "${short_root}"
+          RIVE_TMP_DIR="$(cd "${short_root}" && pwd -P)"
+        else
+          RIVE_TMP_DIR=$(mktemp -d)
+        fi
         echo "RIVE_ROOT=${RIVE_TMP_DIR}" >> "$GITHUB_ENV"
         url="${{ inputs.rive_repo_url }}"
         ref="${{ inputs.rive_ref }}"
+        tag="${{ inputs.rive_tag }}"
         sha="${{ inputs.rive_sha }}"
+        selected_tag=""
         echo "Cloning Rive runtime from: ${url}"
         if [ -n "$sha" ]; then
+          echo "Checking out Rive runtime commit SHA: ${sha}"
           git -c core.autocrlf=false -c core.eol=lf clone --depth 1 "$url" "$RIVE_TMP_DIR"
           (cd "$RIVE_TMP_DIR" && git fetch --depth 1 origin "$sha" && git checkout -f "$sha")
+        elif [ -n "$tag" ]; then
+          echo "Checking out Rive runtime tag: ${tag}"
+          git -c core.autocrlf=false -c core.eol=lf clone --depth 1 --branch "$tag" "$url" "$RIVE_TMP_DIR"
+          selected_tag="$tag"
         elif [ -n "$ref" ]; then
+          echo "Checking out Rive runtime ref: ${ref}"
           git -c core.autocrlf=false -c core.eol=lf clone --depth 1 --branch "$ref" "$url" "$RIVE_TMP_DIR"
         else
           git -c core.autocrlf=false -c core.eol=lf clone --depth 1 "$url" "$RIVE_TMP_DIR"
         fi
+        echo "RIVE_RUNTIME_TAG=${selected_tag}" >> "$GITHUB_ENV"
         # Double-check repo config to avoid CRLF breaking patch apply
         (cd "$RIVE_TMP_DIR" && git config core.autocrlf false && git config core.eol lf)
         echo "Checked out rive-runtime commit: $(cd "$RIVE_TMP_DIR" && git rev-parse HEAD)"
@@ -112,23 +136,14 @@ runs:
       run: |
         set -euo pipefail
 
-        if [[ "$INPUT_PLATFORM" != "x86_64-win32" && "$INPUT_PLATFORM" != "x86-win32" ]]; then
-          echo "error: build_mode=vanilla is currently only supported for win32 platforms" >&2
-          exit 1
-        fi
-
-        build_args=(release clean)
-        if [ "$INPUT_WITH_VULKAN" = "true" ]; then
-          build_args+=(--with_vulkan)
-        fi
-        build_args+=(
-          --
+        library_targets=(
           rive
           rive_pls_renderer
           rive_decoders
           rive_harfbuzz
           rive_sheenbidi
           rive_yoga
+          luau_vm
           miniaudio
           zlib
           libpng
@@ -136,11 +151,270 @@ runs:
           libwebp
         )
 
-        echo "Running (in ${RIVE_ROOT}/renderer): ../build/build_rive.sh ${build_args[*]}"
-        (
-          cd "${RIVE_ROOT}/renderer"
-          ../build/build_rive.sh "${build_args[@]}"
-        )
+        supported_premake_options=()
+        add_supported_premake_option() {
+          local trigger="$1"
+          local option="$2"
+
+          if grep -R -E "trigger[[:space:]]*=[[:space:]]*['\"]${trigger}['\"]" \
+              "${RIVE_ROOT}/premake5_v2.lua" \
+              "${RIVE_ROOT}/renderer" \
+              "${RIVE_ROOT}/build/rive_build_config.lua" >/dev/null 2>&1; then
+            supported_premake_options+=("${option}")
+          else
+            echo "Skipping unsupported Premake option: ${option}"
+          fi
+        }
+
+        case "$INPUT_PLATFORM" in
+          x86_64-win32|x86-win32)
+            if ! command -v make >/dev/null 2>&1; then
+              echo "error: make is required for renderer shader generation on Windows. Ensure the workflow installs it before invoking build_mode=vanilla." >&2
+              exit 1
+            fi
+
+            premake_repo="${RIVE_ROOT}/build/dependencies/premake-core"
+            premake_exe="${premake_repo}/bin/release/premake5.exe"
+            premake_tag="v5.0.0-beta7"
+
+            if [[ ! -x "${premake_exe}" ]]; then
+              rm -rf "${premake_repo}"
+              echo "Bootstrapping Premake ${premake_tag} into ${premake_repo}"
+              git clone --depth 1 --branch "${premake_tag}" https://github.com/premake/premake-core.git "${premake_repo}"
+              (
+                cd "${premake_repo}"
+                cmd //c Bootstrap.bat
+              )
+            fi
+
+            export PREMAKE_PATH="${RIVE_ROOT}/build"
+
+            build_args=(
+              vs2022
+              --config=release
+              --out=out/release
+              --toolset=msc
+            )
+            supported_premake_options=()
+            add_supported_premake_option no-lto --no-lto
+            add_supported_premake_option with_rive_text --with_rive_text
+            add_supported_premake_option with_rive_layout --with_rive_layout
+            add_supported_premake_option with_rive_canvas --with_rive_canvas
+            add_supported_premake_option with_rive_tools --with_rive_tools
+            add_supported_premake_option with_rive_scripting --with_rive_scripting
+            if [ "$INPUT_WITH_VULKAN" = "true" ]; then
+              add_supported_premake_option with_vulkan --with_vulkan
+            fi
+            build_args+=("${supported_premake_options[@]}")
+
+            msbuild_target_arg="$(IFS=';'; echo "${library_targets[*]}")"
+            # Use the dash form on Git Bash/Windows so MSYS does not rewrite /t:...
+            # before MSBuild sees it.
+            msbuild_target_arg="-t:${msbuild_target_arg}"
+
+            echo "Vanilla build command lines:"
+            echo "  cd renderer"
+            echo "  export PREMAKE_PATH=\"\$PWD/../build\""
+            printf '  ../build/dependencies/premake-core/bin/release/premake5.exe'
+            for arg in "${build_args[@]}"; do
+              printf ' %q' "${arg}"
+            done
+            printf '\n'
+
+            (
+              cd "${RIVE_ROOT}/renderer"
+              "${premake_exe}" "${build_args[@]}"
+              python3 - <<'PY'
+        from pathlib import Path
+        import xml.etree.ElementTree as ET
+
+        namespace = "http://schemas.microsoft.com/developer/msbuild/2003"
+        ET.register_namespace("", namespace)
+
+        def child(parent, name):
+            return parent.find(f"{{{namespace}}}{name}")
+
+        for path in sorted(Path("out/release").glob("*.vcxproj")):
+            tree = ET.parse(path)
+            root = tree.getroot()
+            changed = False
+            for cl_compile in root.findall(f".//{{{namespace}}}ClCompile"):
+                debug_format = child(cl_compile, "DebugInformationFormat")
+                if debug_format is None:
+                    debug_format = ET.SubElement(cl_compile, f"{{{namespace}}}DebugInformationFormat")
+                if debug_format.text != "None":
+                    debug_format.text = "None"
+                    changed = True
+            if changed:
+                tree.write(path, encoding="utf-8", xml_declaration=True)
+                print(f"Disabled compiler debug info in {path}")
+        PY
+              mapfile -t msbuild_config < <(INPUT_PLATFORM="${INPUT_PLATFORM}" python3 - <<'PY'
+        from pathlib import Path
+        import os
+        import sys
+
+        solution = Path("out/release/rive.sln")
+        configs = []
+        in_section = False
+        for raw_line in solution.read_text(errors="replace").splitlines():
+            line = raw_line.strip()
+            if line.startswith("GlobalSection(SolutionConfigurationPlatforms)"):
+                in_section = True
+                continue
+            if in_section and line.startswith("EndGlobalSection"):
+                break
+            if in_section and "=" in line:
+                config_platform = line.split("=", 1)[0].strip()
+                if "|" in config_platform:
+                    actual_config, actual_platform = config_platform.split("|", 1)
+                    configs.append([actual_config.strip(), actual_platform.strip()])
+
+        platform_preferences = {
+            "x86_64-win32": ["x64", "Win64"],
+            "x86-win32": ["Win32", "x86"],
+        }
+        config_preferences = ["release", "Release", "RELEASE", "default", "Default"]
+        input_platform = os.environ["INPUT_PLATFORM"]
+
+        for platform in platform_preferences[input_platform]:
+            for config in config_preferences:
+                for actual_config, actual_platform in configs:
+                    if actual_config == config and actual_platform == platform:
+                        print(actual_config)
+                        print(actual_platform)
+                        sys.exit(0)
+
+        for platform in platform_preferences[input_platform]:
+            for actual_config, actual_platform in configs:
+                if actual_config.lower() == "release" and actual_platform == platform:
+                    print(actual_config)
+                    print(actual_platform)
+                    sys.exit(0)
+
+        for platform in platform_preferences[input_platform]:
+            for actual_config, actual_platform in configs:
+                if actual_platform == platform:
+                    print(actual_config)
+                    print(actual_platform)
+                    sys.exit(0)
+
+        print("error: failed to find a usable MSBuild solution configuration in out/release/rive.sln", file=sys.stderr)
+        print("Available solution configurations:", file=sys.stderr)
+        for actual_config, actual_platform in configs:
+            print(f"  {actual_config}|{actual_platform}", file=sys.stderr)
+        sys.exit(1)
+        PY
+              )
+              if [[ "${#msbuild_config[@]}" -ne 2 ]]; then
+                echo "error: failed to resolve MSBuild solution configuration" >&2
+                exit 1
+              fi
+              msbuild_configuration="${msbuild_config[0]//$'\r'/}"
+              msbuild_platform="${msbuild_config[1]//$'\r'/}"
+              msbuild_props=(
+                -p:Configuration="${msbuild_configuration}"
+                -p:Platform="${msbuild_platform}"
+                -p:DebugInformationFormat=None
+                -p:GenerateDebugInformation=false
+              )
+              echo "Using MSBuild solution configuration: ${msbuild_configuration}|${msbuild_platform}"
+              printf '  MSBuild.exe ./out/release/rive.sln -m'
+              for arg in "${msbuild_props[@]}"; do
+                printf ' %q' "${arg}"
+              done
+              printf ' %q\n' "${msbuild_target_arg}"
+              MSBuild.exe ./out/release/rive.sln -m "${msbuild_props[@]}" "${msbuild_target_arg}"
+            )
+            ;;
+
+          x86_64-linux|arm64-linux|x86_64-macos|arm64-macos)
+            if ! command -v ninja >/dev/null 2>&1; then
+              echo "error: ninja is required for build_mode=vanilla on ${INPUT_PLATFORM}" >&2
+              exit 1
+            fi
+
+            case "$INPUT_PLATFORM" in
+              x86_64-linux|x86_64-macos) rive_arch=x64 ;;
+              arm64-linux|arm64-macos) rive_arch=arm64 ;;
+            esac
+
+            build_script="${RIVE_ROOT}/build/build_rive.sh"
+            if [[ ! -x "${build_script}" ]]; then
+              chmod +x "${build_script}"
+            fi
+
+            build_args=(
+              nobuild
+              ninja
+              "${rive_arch}"
+              release
+            )
+            supported_premake_options=()
+            add_supported_premake_option with_rive_text --with_rive_text
+            add_supported_premake_option with_rive_layout --with_rive_layout
+            add_supported_premake_option with_rive_canvas --with_rive_canvas
+            add_supported_premake_option with_rive_tools --with_rive_tools
+            add_supported_premake_option with_rive_scripting --with_rive_scripting
+            if [[ "$INPUT_PLATFORM" == *-linux ]]; then
+              add_supported_premake_option no-lto --no-lto
+              add_supported_premake_option with-pic --with-pic
+            fi
+            if [ "$INPUT_WITH_VULKAN" = "true" ]; then
+              add_supported_premake_option with_vulkan --with_vulkan
+            fi
+            build_args+=("${supported_premake_options[@]}")
+
+            echo "Vanilla build command lines:"
+            echo "  cd renderer"
+            printf '  RIVE_OUT=out/release ../build/build_rive.sh'
+            for arg in "${build_args[@]}"; do
+              printf ' %q' "${arg}"
+            done
+            printf '\n'
+
+            (
+              cd "${RIVE_ROOT}/renderer"
+              RIVE_OUT=out/release "${build_script}" "${build_args[@]}"
+
+              ninja -C out/release -t targets all > out/release/ninja-targets.txt
+              resolved_targets=()
+              for target in "${library_targets[@]}"; do
+                candidates=(
+                  "${target}"
+                  "lib${target}.a"
+                  "${target}.a"
+                )
+                resolved_target=""
+                for candidate in "${candidates[@]}"; do
+                  if grep -Eq "^${candidate}:" out/release/ninja-targets.txt; then
+                    resolved_target="${candidate}"
+                    break
+                  fi
+                done
+                if [[ -z "${resolved_target}" ]]; then
+                  echo "error: failed to resolve Ninja target for ${target}" >&2
+                  echo "Available targets:" >&2
+                  sed -n '1,160p' out/release/ninja-targets.txt >&2
+                  exit 1
+                fi
+                resolved_targets+=("${resolved_target}")
+              done
+
+              printf '  ninja -C out/release'
+              for target in "${resolved_targets[@]}"; do
+                printf ' %q' "${target}"
+              done
+              printf '\n'
+              ninja -C out/release "${resolved_targets[@]}"
+            )
+            ;;
+
+          *)
+            echo "error: build_mode=vanilla is not supported for ${INPUT_PLATFORM}" >&2
+            exit 1
+            ;;
+        esac
 
     - name: Install Rive Runtime (vanilla)
       if: ${{ inputs.build_mode == 'vanilla' }}
@@ -152,7 +426,12 @@ runs:
 
         repo_root="$(pwd -P)"
         prefix="${repo_root}/defold-rive"
-        install_dir="${prefix}/lib/${INPUT_PLATFORM}"
+        install_platform="${INPUT_PLATFORM}"
+        case "${INPUT_PLATFORM}" in
+          arm64-macos) install_platform="arm64-osx" ;;
+          x86_64-macos) install_platform="x86_64-osx" ;;
+        esac
+        install_dir="${prefix}/lib/${install_platform}"
         version_header="${prefix}/include/defold/rive_version.h"
         runtime_out_dir="${RIVE_ROOT}/renderer/out/release"
 
@@ -163,6 +442,9 @@ runs:
         "${repo_root}/utils/rive-runtime/buildscripts/build_headers.sh" --prefix "${prefix}" --root "${RIVE_ROOT}"
         "${repo_root}/utils/rive-runtime/buildscripts/build_version_header.sh" "${version_header}" "${RIVE_ROOT}"
 
+        echo "Libraries produced in ${runtime_out_dir}:"
+        find "${runtime_out_dir}" -maxdepth 1 -type f \( -name '*.lib' -o -name '*.a' \) | sort
+
         found_libs=0
         for ext in lib a; do
           for src in "${runtime_out_dir}"/*.${ext}; do
@@ -170,6 +452,26 @@ runs:
               continue
             fi
             cp -f "${src}" "${install_dir}/"
+            if [[ "${INPUT_PLATFORM}" == *-win32 ]]; then
+              copied_lib="${install_dir}/$(basename "${src}")"
+              strip_tool=""
+              if command -v llvm-strip >/dev/null 2>&1; then
+                strip_tool="llvm-strip"
+              elif command -v llvm-strip.exe >/dev/null 2>&1; then
+                strip_tool="llvm-strip.exe"
+              fi
+              if [[ -n "${strip_tool}" ]]; then
+                before_size="$(wc -c < "${copied_lib}" | tr -d '[:space:]')"
+                if "${strip_tool}" --strip-debug "${copied_lib}"; then
+                  after_size="$(wc -c < "${copied_lib}" | tr -d '[:space:]')"
+                  echo "Stripped debug sections from $(basename "${copied_lib}"): ${before_size} -> ${after_size} bytes"
+                else
+                  echo "warning: ${strip_tool} failed for $(basename "${copied_lib}"); leaving it unstripped" >&2
+                fi
+              else
+                echo "warning: llvm-strip not found; leaving $(basename "${copied_lib}") unstripped" >&2
+              fi
+            fi
             found_libs=1
           done
         done
@@ -179,11 +481,68 @@ runs:
           exit 1
         fi
 
+        echo "Installed library sizes in ${install_dir}:"
+        for lib in "${install_dir}"/*; do
+          [[ -f "${lib}" ]] || continue
+          size="$(wc -c < "${lib}" | tr -d '[:space:]')"
+          echo "  $(basename "${lib}"): ${size} bytes"
+        done
+
+        max_github_blob_size=100000000
+        for lib in "${install_dir}"/*; do
+          [[ -f "${lib}" ]] || continue
+          size="$(wc -c < "${lib}" | tr -d '[:space:]')"
+          if (( size > max_github_blob_size )); then
+            echo "error: $(basename "${lib}") is ${size} bytes, which exceeds GitHub's 100 MB file limit." >&2
+            echo "error: remove debug info or reduce the built feature set before committing this artifact." >&2
+            exit 1
+          fi
+        done
+
+    - name: Verify Luau VM library
+      shell: bash
+      env:
+        INPUT_PLATFORM: ${{ inputs.platform }}
+      run: |
+        set -euo pipefail
+
+        install_platform="${INPUT_PLATFORM}"
+        case "${INPUT_PLATFORM}" in
+          arm64-macos) install_platform="arm64-osx" ;;
+          x86_64-macos) install_platform="x86_64-osx" ;;
+        esac
+        lib_dir="defold-rive/lib/${install_platform}"
+        if [[ "${INPUT_PLATFORM}" == *-win32 ]]; then
+          luau_lib="${lib_dir}/luau_vm.lib"
+        else
+          luau_lib="${lib_dir}/libluau_vm.a"
+        fi
+
+        if [[ ! -f "${luau_lib}" ]]; then
+          echo "error: expected Luau VM library is missing: ${luau_lib}" >&2
+          echo "Contents of ${lib_dir}:" >&2
+          if [[ -d "${lib_dir}" ]]; then
+            for lib in "${lib_dir}"/*; do
+              [[ -e "${lib}" ]] || continue
+              echo "  $(basename "${lib}")" >&2
+            done
+          fi
+          if [[ -n "${RIVE_ROOT:-}" && -d "${RIVE_ROOT}" ]]; then
+            echo "Luau VM artifacts found under ${RIVE_ROOT}:" >&2
+            find "${RIVE_ROOT}" -type f \( -name "luau_vm.lib" -o -name "libluau_vm.a" \) 2>/dev/null | sort >&2 || true
+          fi
+          exit 1
+        fi
+
     - name: Pack artifacts (optional)
       if: ${{ inputs.upload_artifact == 'true' }}
       shell: bash
       run: |
         set -euo pipefail
+        target_branch="${{ inputs.target_branch }}"
+        if [ -z "${target_branch}" ]; then
+          target_branch="${GITHUB_REF_NAME}"
+        fi
         paths=()
         [ -d defold-rive/lib ] && paths+=(defold-rive/lib)
         [ -d defold-rive/include ] && paths+=(defold-rive/include)
@@ -192,14 +551,14 @@ runs:
           exit 0
         fi
         echo "Packing: ${paths[*]}"
-        tar -czf "branch-artifacts-${GITHUB_REF_NAME}.tgz" "${paths[@]}"
+        tar -czf "branch-artifacts-${target_branch}.tgz" "${paths[@]}"
 
     - name: Upload artifact (optional)
       if: ${{ inputs.upload_artifact == 'true' }}
       uses: actions/upload-artifact@v4
       with:
-        name: branch-artifacts-${{ github.ref_name }}
-        path: branch-artifacts-${{ github.ref_name }}.tgz
+        name: branch-artifacts-${{ inputs.target_branch || github.ref_name }}
+        path: branch-artifacts-${{ inputs.target_branch || github.ref_name }}.tgz
         if-no-files-found: ignore
 
     - name: Commit and push changes (optional)
@@ -207,8 +566,10 @@ runs:
       shell: bash
       env:
         COMMIT_SUFFIX: ${{ inputs.commit_message }}
+        TARGET_BRANCH: ${{ inputs.target_branch }}
       run: |
         set -euo pipefail
+        target_branch="${TARGET_BRANCH:-${GITHUB_REF_NAME}}"
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         add_paths=()
@@ -221,7 +582,7 @@ runs:
           echo "No changes to commit."
           exit 0
         fi
-        msg="ci: update artifacts on ${GITHUB_REF_NAME} [skip ci]"
+        msg="ci: update artifacts on ${target_branch} [skip ci]"
         if [ -n "${COMMIT_SUFFIX}" ]; then
           msg="$msg - ${COMMIT_SUFFIX}"
         fi
@@ -231,13 +592,13 @@ runs:
         attempt=1
         until [ $attempt -gt $max_attempts ]; do
           echo "Attempt $attempt: rebase + push"
-          if git pull --rebase origin "${GITHUB_REF_NAME}"; then
+          if git pull --rebase origin "${target_branch}"; then
             local_sha="$(git rev-parse HEAD)"
-            if git push origin HEAD:"${GITHUB_REF_NAME}"; then
+            if git push origin HEAD:"${target_branch}"; then
               echo "Push succeeded"
               break
             fi
-            remote_sha="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | awk '{print $1}' || true)"
+            remote_sha="$(git ls-remote origin "refs/heads/${target_branch}" | awk '{print $1}' || true)"
             if [ -n "${remote_sha}" ] && [ "${remote_sha}" = "${local_sha}" ]; then
               echo "Remote branch already points at ${local_sha}; treating push as successful."
               break
